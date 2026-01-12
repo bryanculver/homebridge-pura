@@ -9,10 +9,10 @@ import {
   CognitoUserSession,
 } from 'amazon-cognito-identity-js';
 import axios, { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
-import { CLIENT_ID, USER_POOL_ID } from './const';
-import { PuraApiException, PuraAuthenticationError } from './exceptions';
-import { decode } from './utils';
-import { WebSocketSubscriber, MessageHandler } from './ws_subscriber';
+import { CLIENT_ID, USER_POOL_ID } from './const.js';
+import { PuraApiException, PuraAuthenticationError } from './exceptions.js';
+import { decode } from './utils.js';
+import { WebSocketSubscriber, MessageHandler } from './ws_subscriber.js';
 
 export const BASE_URL = 'https://trypura.io/mobile/api/';
 export const TIMER_DURATION_DEFAULT = 4 * 60 * 60; // 4 hours in seconds
