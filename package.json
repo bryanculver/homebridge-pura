@@ -33,19 +33,22 @@
     "watch": "npm run build && npm link && nodemon"
   },
   "dependencies": {
-    "homebridge-lib": "^7.1.4",
+    "amazon-cognito-identity-js": "^6.3.16",
+    "axios": "^1.13.2",
+    "homebridge-lib": "^7.2.2",
     "node-fetch": "^3.3.2",
-    "amazon-cognito-identity-js": "^6.3.12"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.21.0",
+    "@eslint/js": "^9.39.2",
     "@types/node": "^22.13.5",
-    "eslint": "^9.21.0",
-    "homebridge": "^2.0.0-beta.0",
-    "nodemon": "^3.1.9",
-    "rimraf": "^6.0.1",
+    "@types/ws": "^8.18.1",
+    "eslint": "^9.39.2",
+    "homebridge": "^1.11.1",
+    "nodemon": "^3.1.11",
+    "rimraf": "^6.1.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.24.1"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.52.0"
   }
 }

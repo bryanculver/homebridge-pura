@@ -1,7 +1,7 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
 import type { PuraPlatform } from './platform.js';
-import { PuraApi } from './puraApi.js';
+import { Pura } from './lib/purajs/index.js';
 import { PuraDevice, PuraBay } from './puraTypes.js';
 
 /**
@@ -25,7 +25,7 @@ export class PuraPlatformAccessory {
   constructor(
     private readonly platform: PuraPlatform,
     private readonly accessory: PlatformAccessory,
-    private readonly puraApi: PuraApi,
+    private readonly pura: Pura,
   ) {
     this.device = accessory.context.device;
     this.bayNumber = accessory.context.bayNumber;
@@ -91,7 +91,7 @@ export class PuraPlatformAccessory {
       if (isOn) {
         // Turn on with current intensity or default to 50%
         const intensity = this.currentState.RotationSpeed || 50;
-        const success = await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity);
+        const success = await this.pura.setIntensity(this.device.id, this.bayNumber, 'mobile', intensity);
         
         if (success) {
           this.currentState.On = true;
@@ -103,7 +103,7 @@ export class PuraPlatformAccessory {
         }
       } else {
         // Turn off by setting intensity to 0
-        const success = await this.puraApi.setIntensity(this.device.id, this.bayNumber, 0);
+        const success = await this.pura.setIntensity(this.device.id, this.bayNumber, 'mobile', 0);
         
         if (success) {
           this.currentState.On = false;
@@ -137,8 +137,8 @@ export class PuraPlatformAccessory {
     this.platform.log.debug(`Set Characteristic RotationSpeed for ${this.accessory.displayName} ->`, intensity);
 
     try {
-      const success = await this.puraApi.setIntensity(this.device.id, this.bayNumber, intensity);
-      
+      const success = await this.pura.setIntensity(this.device.id, this.bayNumber, 'mobile', intensity);
+
       if (success) {
         this.currentState.RotationSpeed = intensity;
         this.currentState.On = intensity > 0;

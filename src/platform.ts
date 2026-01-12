@@ -2,7 +2,7 @@ import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAcces
 
 import { PuraPlatformAccessory } from './platformAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
-import { PuraApi } from './puraApi.js';
+import { Pura, PuraTokens, PuraAuthenticationError, PuraApiException } from './lib/purajs/index.js';
 import { PuraDevice, PuraConfig } from './puraTypes.js';
 
 /**
@@ -18,9 +18,10 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   public readonly accessories: Map<string, PlatformAccessory> = new Map();
   public readonly discoveredCacheUUIDs: string[] = [];
 
-  private readonly puraApi: PuraApi;
+  private pura: Pura | null = null;
   private readonly puraConfig: PuraConfig;
   private refreshInterval: NodeJS.Timeout | null = null;
+  private readonly tokenCachePath: string;
 
   constructor(
     public readonly log: Logging,
@@ -37,7 +38,8 @@ export class PuraPlatform implements DynamicPlatformPlugin {
     }
 
     this.puraConfig = config as PuraConfig;
-    this.puraApi = new PuraApi(this.log);
+    this.tokenCachePath = this.api.user.storagePath() + '/homebridge-pura-tokens.json';
+    this.pura = null; // Will be initialized in discoverDevices()
 
     this.log.debug('Finished initializing platform:', this.config.name);
 
@@ -71,19 +73,97 @@ export class PuraPlatform implements DynamicPlatformPlugin {
   }
 
   /**
+   * Initialize Pura client with saved tokens or fresh authentication
+   */
+  private async initializePuraClient() {
+    // Try to load saved tokens
+    const savedTokens = await this.loadTokens();
+
+    if (savedTokens) {
+      this.log.info('Initializing Pura client with saved tokens...');
+      this.pura = new Pura({
+        username: this.puraConfig.username,
+        ...savedTokens,
+      });
+
+      // Verify tokens are still valid by making a test request
+      try {
+        await this.pura.getDevices();
+        this.log.info('Saved tokens are valid');
+        return;
+      } catch (error) {
+        this.log.debug('Saved tokens are invalid, will re-authenticate');
+        this.pura = null;
+      }
+    }
+
+    // No valid tokens, authenticate with password
+    this.log.info('Authenticating with Pura...');
+    this.pura = new Pura({
+      username: this.puraConfig.username,
+    });
+
+    await this.pura.authenticate(this.puraConfig.password);
+    this.log.info('Pura authentication successful');
+  }
+
+  /**
+   * Load tokens from cache file
+   */
+  private async loadTokens(): Promise<PuraTokens | null> {
+    try {
+      const fs = await import('fs/promises');
+      const data = await fs.readFile(this.tokenCachePath, 'utf-8');
+      const tokens = JSON.parse(data) as PuraTokens;
+      this.log.debug('Loaded tokens from cache');
+      return tokens;
+    } catch (error) {
+      this.log.debug('No cached tokens found or error reading cache');
+      return null;
+    }
+  }
+
+  /**
+   * Save tokens to cache file
+   */
+  private async saveTokens() {
+    if (!this.pura) {
+      return;
+    }
+
+    try {
+      const tokens = await this.pura.getTokens();
+      if (tokens.accessToken && tokens.idToken && tokens.refreshToken) {
+        const fs = await import('fs/promises');
+        const data = JSON.stringify(tokens, null, 2);
+        await fs.writeFile(this.tokenCachePath, data, 'utf-8');
+        this.log.debug('Saved tokens to cache');
+      }
+    } catch (error) {
+      this.log.error('Failed to save tokens:', error);
+    }
+  }
+
+  /**
    * Discover and register Pura devices
    */
   async discoverDevices() {
     try {
-      // Authenticate with Pura
-      this.log.info('Authenticating with Pura...');
-      await this.puraApi.authenticate(this.puraConfig.username, this.puraConfig.password);
-      this.log.info('Pura authentication successful');
+      // Initialize Pura client
+      await this.initializePuraClient();
+
+      if (!this.pura) {
+        throw new Error('Failed to initialize Pura client');
+      }
 
       // Get devices
       this.log.info('Discovering Pura devices...');
-      const devices = await this.puraApi.getDevices();
+      const response = await this.pura.getDevices();
+      const devices = response.devices || [];
       this.log.info(`Found ${devices.length} Pura device(s)`);
+
+      // Save tokens after successful authentication
+      await this.saveTokens();
 
       // Register each device
       for (const device of devices) {
@@ -97,7 +177,12 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       this.setupRefreshInterval();
 
     } catch (error) {
-      this.log.error('Failed to discover Pura devices:', error);
+      if (error instanceof PuraAuthenticationError) {
+        this.log.error('Pura authentication failed:', error.message);
+        this.log.error('Please check your username and password in the config');
+      } else {
+        this.log.error('Failed to discover Pura devices:', error);
+      }
     }
   }
 
@@ -140,7 +225,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       this.api.updatePlatformAccessories([existingAccessory]);
 
       // Create the accessory handler
-      new PuraPlatformAccessory(this, existingAccessory, this.puraApi);
+      new PuraPlatformAccessory(this, existingAccessory, this.pura!);
     } else {
       // Create new accessory
       this.log.info('Adding new accessory:', accessoryName);
@@ -151,7 +236,7 @@ export class PuraPlatform implements DynamicPlatformPlugin {
       accessory.context.bayNumber = bayNumber;
 
       // Create the accessory handler
-      new PuraPlatformAccessory(this, accessory, this.puraApi);
+      new PuraPlatformAccessory(this, accessory, this.pura!);
 
       // Register the accessory
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
@@ -194,9 +279,15 @@ export class PuraPlatform implements DynamicPlatformPlugin {
    * Refresh status of all devices
    */
   private async refreshDeviceStatus() {
+    if (!this.pura) {
+      this.log.error('Pura client not initialized');
+      return;
+    }
+
     try {
-      const devices = await this.puraApi.getDevices();
-      
+      const response = await this.pura.getDevices();
+      const devices = response.devices || [];
+
       for (const device of devices) {
         // Update accessories for each bay
         if (device.bay1) {
@@ -207,15 +298,11 @@ export class PuraPlatform implements DynamicPlatformPlugin {
         }
       }
     } catch (error) {
-      this.log.debug('Device status refresh failed:', error);
-      // Try to refresh tokens if authentication failed
-      if (error instanceof Error && error.message.includes('authentication')) {
-        try {
-          await this.puraApi.refreshToken();
-          this.log.debug('Token refresh successful');
-        } catch (refreshError) {
-          this.log.error('Token refresh failed:', refreshError);
-        }
+      if (error instanceof PuraAuthenticationError) {
+        this.log.error('Authentication error during refresh:', error.message);
+        this.log.error('Please restart Homebridge to re-authenticate');
+      } else {
+        this.log.debug('Device status refresh failed:', error);
       }
     }
   }
